@@ -20,14 +20,14 @@ DallasTemperature sensors(&oneWire);
 
 #define shiftRegCount 4
 #define RegisterPins shiftRegCount * 8
-boolean registers[RegisterPins];
+boolean registers[RegisterPins+8];
 
 // Limitswitch Pin, Stepper motor pins shiftregister offset, Calibration offset, CurrentDigit, Amount of Movement left
 int MOTORS[4][5] = {
   {A0, 0, 20, 0, 0},
   {A3, 8, 40, 0, 0},
-  {2, 16, 30, 0, 0},
-  {8, 24, 10, 0, 0}
+  {2, 16, 40, 0, 0},
+  {8, 24, 5, 0, 0}
 };
 
 //Switch 1 and 2 pins used for changing color and modes
@@ -35,7 +35,7 @@ int SW1 = A5;
 int SW2 = A2;
 
 int DayColor[] = {255, 255, 255};
-int NightColor[] = {80, 255, 0};
+int NightColor[] = {48, 255, 0};
 
 //Clear entire shift register
 void clearRegisters(){
@@ -56,13 +56,16 @@ void writeRegisters(){
 }
 
 //Motor step delay lower then 500 has issues
-int motorSpeed = 1000;
+int motorSpeed = 500;
 
 char currentDate[] = "000000";
-char currentTime[] = "111111.00";
+char currentTime[] = "000000.00";
 
 int currentTemp = 0;
 int TimeFix = 0;
+
+int ended = 0;
+int started = 1;
 
 void setup() {
   FastLED.addLeds<LED_TYPE, DATA_PIN>(leds, NUM_LEDS);
@@ -81,9 +84,8 @@ void setup() {
   pinMode(SW1, INPUT);
   pinMode(SW2, INPUT);
 
-  //reset all register pins
-  clearRegisters();
-  writeRegisters();
+  Background(1, NightColor);
+  delay(1000);
 
   for(int x = 0; x < 4; x++){
     calibrate(MOTORS[x]);
@@ -106,37 +108,25 @@ void loop(){
    if(digitalRead(SW2)){
     colorMode = !colorMode;
    }
-   //testMode();
    
    if(mode){
     updateDateTime();
     showTime();
-   
-    if(millis()-lastBlink > 1000){
-      lastBlink = millis();
-      blinkBright = !blinkBright;
-      if(colorMode){
-        Background(blinkBright, DayColor);
-      }else{
-        Background(blinkBright, NightColor);
-      }
-    }
+//    if(millis()-lastBlink > 1000){
+//      lastBlink = millis();
+//      blinkBright = !blinkBright;
+//      if(colorMode){
+//        Background(blinkBright, DayColor);
+//      }else{
+//        Background(blinkBright, NightColor);
+//      }
+//    }
    }else{
     updateTemp();
     showTemp();
     BackgroundTemp();
    }
-     Serial.println(currentTime);
-}
-
-void testMode(){
-  int i = 0;
-  while (Serial.available() > 0)
-  {
-    currentTime[i] = Serial.read();
-    i++;
-  }
-  Serial.println(currentTime);
+     //Serial.println(currentTime);
 }
 
 //Update time when it changes
@@ -144,9 +134,17 @@ void showTime(){
   //Stop the serial connection with GPS when driving steppers
   //Because it causes lag
   if(MOTORS[0][4] != 0 || MOTORS[1][4] != 0 || MOTORS[2][4] != 0 || MOTORS[3][4] != 0){
-    SoftSerial.end();
+    if(!ended){
+      SoftSerial.end();
+      ended = 1;
+      started = 0;
+    }
   }else{
+    if(!started){
      SoftSerial.begin(9600);
+     started = 1;
+     ended = 0;
+    }
   }
 
   //Doing this is ugly but the fast way by substracting -48 from the ASCCI value sometimes caused strange behavior
@@ -156,6 +154,7 @@ void showTime(){
   for(int x = 0; x < 4; x++){
     tmp[0] = currentTime[x];
     updateDigit2(MOTORS[x], atoi(tmp));
+    ///updateDigit(MOTORS[x], atoi(tmp));
   }
 }
 
@@ -172,7 +171,7 @@ void updateTemp(){
 //Update digit pos type 1; is blocking not used currently
 void updateDigit(int motor[], int digit){
   if(motor[3] != digit && digit >= 0 && digit <= 9){
-    //SoftSerial.end();
+    SoftSerial.end();
     if(digit > motor[3]){
        int x = (digit-motor[3])* (280);
        while(x > 0){
@@ -186,10 +185,9 @@ void updateDigit(int motor[], int digit){
        x--;
       }
     }
-    //SoftSerial.begin(9600);
+    SoftSerial.begin(9600);
     motor[3] = digit;
-    clearRegisters();
-    writeRegisters(); 
+    clearstepper(motor[1]);
   }
 
 }
@@ -214,8 +212,7 @@ void updateDigit2(int motor[], int digit){
       
       if(motor[4] == 0){
        motor[3] = digit;
-       clearRegisters();
-       writeRegisters(); 
+       clearstepper(motor[1]);
       }
     } 
   }
@@ -248,46 +245,40 @@ void updateDateTime(){
       char c = SoftSerial.read();
       Serial.write(c);
       if(match){
-        if(item == 0 && c >= 48 && c <= 57){
+          if(c >= 48 && c <= 57 || c == 46){
            tmpTime[itemCount] = c;
-           timeReady = 1;
            itemCount++;
-        }
-        if(item == 8 && c != ','){
-           currentDate[itemCount] = c;
-           itemCount++;
-        }
-        if(c == ','){
-          item++;
-          itemCount = 0;
-        }
-      }
-      if (header[charCount] == c)
-        {
-          charCount++;
-        }else{
-          if(charCount == 6){
-            match = 1;
           }
-          charCount = 0;
+        if(c == ','){
+          if(currentTime != tmpTime && itemCount == 9){
+            //Add timezone in this add +1 hours
+            memcpy(currentTime, tmpTime, 8);
+            int A = int(currentTime[0])-48;
+            int B = int(currentTime[1])-48;
+            
+            int hour = A*10+(B+1);
+            if(hour > 23){
+              hour -= 24;
+            }
+            currentTime[0] = 48 + hour / 10;
+            currentTime[1] = 48 + hour % 10;
+            Serial.println(currentTime);
+          }
+          itemCount = 0;
+          match = 0;
+          item = 0;
         }
-      if(c == '*'){
-        match = 0;
-        item = 0;
+      }else{
+        if(charCount >= 6){
+          charCount = 0;
+          match = 1;
+        }
+        if (header[charCount] == c){
+           charCount++;
+        }else{
+           charCount = 0;
+        }
       }
-}
-//Add timezone in this add +2 hours
-if(currentTime != tmpTime && timeReady){
-  memcpy(currentTime, tmpTime, 9);
-  int A = int(currentTime[0])-48;
-  int B = int(currentTime[1])-48;
-  
-  int hour = A*10+(B+2);
-  if(hour > 23){
-    hour -= 24;
-  }
-  currentTime[0] = 48 + hour / 10;
-  currentTime[1] = 48 + hour % 10;
 }
 }
 
@@ -327,6 +318,14 @@ void BackgroundTemp(){
 
 void setRegisterPin(int index, int value){
   registers[index] = value;
+}
+
+void clearstepper(int offset){
+  setRegisterPin(1+offset, LOW);
+  setRegisterPin(2+offset, LOW);
+  setRegisterPin(3+offset, LOW);
+  setRegisterPin(4+offset, LOW);
+  writeRegisters(); 
 }
 
 void counterclockwise (int offset, int motorSpeed){
