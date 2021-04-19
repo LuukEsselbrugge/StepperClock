@@ -25,9 +25,9 @@ boolean registers[RegisterPins+8];
 // Limitswitch Pin, Stepper motor pins shiftregister offset, Calibration offset, CurrentDigit, Amount of Movement left
 int MOTORS[4][5] = {
   {A0, 0, 20, 0, 0},
-  {A3, 8, 40, 0, 0},
-  {2, 16, 40, 0, 0},
-  {8, 24, 5, 0, 0}
+  {A3, 8, 30, 0, 0},
+  {2, 16, 30, 0, 0},
+  {8, 24, 10, 0, 0}
 };
 
 //Switch 1 and 2 pins used for changing color and modes
@@ -56,16 +56,19 @@ void writeRegisters(){
 }
 
 //Motor step delay lower then 500 has issues
-int motorSpeed = 500;
+int motorSpeed = 400;
 
 char currentDate[] = "000000";
 char currentTime[] = "000000.00";
+//Default offset is CET
+int timezoneOffset = 1;
 
 int currentTemp = 0;
 int TimeFix = 0;
 
 int ended = 0;
 int started = 1;
+
 
 void setup() {
   FastLED.addLeds<LED_TYPE, DATA_PIN>(leds, NUM_LEDS);
@@ -84,14 +87,17 @@ void setup() {
   pinMode(SW1, INPUT);
   pinMode(SW2, INPUT);
 
-  Background(1, NightColor);
-  delay(1000);
+  //If SW2 pressed on boot change time to UTC +2 (CEST)
+  if(digitalRead(SW2)){
+    timezoneOffset = 2;
+  }
 
   for(int x = 0; x < 4; x++){
     calibrate(MOTORS[x]);
   }
   clearRegisters();
   writeRegisters();
+  Background(1, NightColor);
   SoftSerial.begin(9600);
 }
 
@@ -105,22 +111,9 @@ void loop(){
     mode = !mode;
    }
    
-   if(digitalRead(SW2)){
-    colorMode = !colorMode;
-   }
-   
    if(mode){
     updateDateTime();
     showTime();
-//    if(millis()-lastBlink > 1000){
-//      lastBlink = millis();
-//      blinkBright = !blinkBright;
-//      if(colorMode){
-//        Background(blinkBright, DayColor);
-//      }else{
-//        Background(blinkBright, NightColor);
-//      }
-//    }
    }else{
     updateTemp();
     showTemp();
@@ -251,12 +244,12 @@ void updateDateTime(){
           }
         if(c == ','){
           if(currentTime != tmpTime && itemCount == 9){
-            //Add timezone in this add +1 hours
+            //Add timezone offset
             memcpy(currentTime, tmpTime, 8);
             int A = int(currentTime[0])-48;
             int B = int(currentTime[1])-48;
             
-            int hour = A*10+(B+1);
+            int hour = A*10+(B+timezoneOffset);
             if(hour > 23){
               hour -= 24;
             }
@@ -294,7 +287,7 @@ void Background(int br, int color[]){
   }
   
     FastLED.show();
-
+    FastLED.show();
 }
 
 void BackgroundTemp(){
