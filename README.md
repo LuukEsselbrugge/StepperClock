@@ -7,6 +7,7 @@ An Arduino based 3D printed stepper motor clock
 * 4X ULN2003 stepper driver (comes with the default board)
 * Arduino Nano
 * NEO 6M GPS Module
+* 4X 28BYJ-48 Stepper motor
 
 ## 3D printed parts
 * 4X Case
